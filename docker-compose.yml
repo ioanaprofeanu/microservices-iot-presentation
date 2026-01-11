@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # MQTT Broker - Eclipse Mosquitto
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - factory-network
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL Database
+  database:
+    image: postgres:15-alpine
+    container_name: factory-db
+    environment:
+      POSTGRES_DB: factory_monitoring
+      POSTGRES_USER: factory_user
+      POSTGRES_PASSWORD: factory_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - factory-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factory_user -d factory_monitoring"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Sensor A - Temperature
+  sensor-temperature:
+    build:
+      context: ./sensor-temp
+      dockerfile: Dockerfile
+    container_name: sensor-temperature
+    environment:
+      MQTT_BROKER: mqtt-broker
+      MQTT_PORT: 1883
+      SENSOR_TYPE: temperature
+      PUBLISH_INTERVAL: 2
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    networks:
+      - factory-network
+    restart: unless-stopped
+
+  # Sensor B - Vibration
+  sensor-vibration:
+    build:
+      context: ./sensor-vib
+      dockerfile: Dockerfile
+    container_name: sensor-vibration
+    environment:
+      MQTT_BROKER: mqtt-broker
+      MQTT_PORT: 1883
+      SENSOR_TYPE: vibration
+      PUBLISH_INTERVAL: 3
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    networks:
+      - factory-network
+    restart: unless-stopped
+
+  # Aggregator Service
+  aggregator:
+    build:
+      context: ./aggregator
+      dockerfile: Dockerfile
+    container_name: aggregator-service
+    environment:
+      MQTT_BROKER: mqtt-broker
+      MQTT_PORT: 1883
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_NAME: factory_monitoring
+      DB_USER: factory_user
+      DB_PASSWORD: factory_pass
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+    networks:
+      - factory-network
+    restart: unless-stopped
+
+networks:
+  factory-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
