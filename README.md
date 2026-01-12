@@ -252,5 +252,3 @@ Acest proiect este creat în scop educațional pentru prezentare de master.
 
 ---
 
-**Autor:** Generated with ❤️ by GitHub Copilot
-**Data:** Ianuarie 2026
